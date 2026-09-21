@@ -1,0 +1,50 @@
+{
+  "name": "ai-lead-engine",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:transfer": "tsx src/scripts/migrate-to-supabase.ts",
+    "auth:provision": "tsx src/scripts/provision-supabase-user.ts",
+    "db:studio": "drizzle-kit studio",
+    "scrape": "tsx src/scripts/scrape.ts",
+    "harvest": "tsx src/scripts/harvest.ts",
+    "send": "tsx src/scripts/send.ts",
+    "build:seed": "tsx src/scripts/seed-curriculum.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
+    "drizzle-orm": "^0.44.6",
+    "jose": "^6.1.0",
+    "lucide-react": "^1.31.0",
+    "next": "16.3.0",
+    "pg": "^8.16.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.2.3",
+    "drizzle-kit": "^0.31.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.6",
+    "typescript": "^5"
+  }
+}
