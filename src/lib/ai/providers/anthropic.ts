@@ -4,6 +4,7 @@ import { caseStudyPrompt } from "../case-study";
 import { dmPrompt } from "../dm";
 import { personalisationPrompt } from "../personalisation";
 import { socialPrompt } from "../social";
+import { classifyPrompt, normalizeClassifications, normalizeQueries, queriesPrompt, X_INTENTS } from "../x-leads";
 import {
   AIProviderError,
   type AIProvider,
@@ -18,7 +19,60 @@ import {
   type ResearchSubject,
   type SocialPostSet,
   type SocialSubject,
+  type XBusinessContext,
+  type XNicheContext,
+  type XPostClassification,
+  type XPostToClassify,
+  type XQueryDraft,
 } from "../types";
+
+const X_CLASSIFY_TOOL = {
+  name: "classify_x_posts",
+  description: "Return one lead classification per supplied X post.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      results: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            relevance: { type: "integer", description: "0-100 fit of the author as a lead" },
+            intent: { type: "string", enum: X_INTENTS },
+            reason: { type: "string", description: "One short sentence citing the deciding words" },
+            niche: { type: ["string", "null"], description: "Exact niche name, or null" },
+          },
+          required: ["id", "relevance", "intent", "reason"],
+        },
+      },
+    },
+    required: ["results"],
+  },
+};
+
+const X_QUERIES_TOOL = {
+  name: "write_x_queries",
+  description: "Return X recent-search queries for one niche.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      queries: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            query: { type: "string", description: "X search syntax, at most 512 characters" },
+            rationale: { type: "string" },
+          },
+          required: ["name", "query", "rationale"],
+        },
+      },
+    },
+    required: ["queries"],
+  },
+};
 
 const DM_TOOL = {
   name: "write_dm_sequence",
@@ -274,6 +328,26 @@ export class AnthropicProvider implements AIProvider {
     };
   }
 
+  async classifyXPosts(input: { business: XBusinessContext; posts: XPostToClassify[] }): Promise<XPostClassification[]> {
+    const result = await this.call<{ results?: unknown[] }>({
+      system: "You qualify sales leads from public social posts. You are strict: sellers and bystanders are not leads.",
+      prompt: classifyPrompt(input.business, input.posts),
+      tool: X_CLASSIFY_TOOL,
+      maxTokens: 400 + input.posts.length * 120,
+    });
+    return normalizeClassifications(result.results, input.posts, input.business);
+  }
+
+  async writeXSearchQueries(input: { business: XBusinessContext; niche: XNicheContext }): Promise<XQueryDraft[]> {
+    const result = await this.call<{ queries?: unknown[] }>({
+      system: "You write precise X (Twitter) search queries for lead generation.",
+      prompt: queriesPrompt(input.business, input.niche),
+      tool: X_QUERIES_TOOL,
+      maxTokens: 1200,
+    });
+    return normalizeQueries(result.queries, input.niche);
+  }
+
   async writeCaseStudy(subject: CaseStudySubject): Promise<CaseStudyDraft> {
     const result = await this.call<CaseStudyDraft>({
       system:
@@ -307,7 +381,9 @@ export class AnthropicProvider implements AIProvider {
       | typeof PERSONALISE_TOOL
       | typeof DM_TOOL
       | typeof SOCIAL_TOOL
-      | typeof CASE_STUDY_TOOL;
+      | typeof CASE_STUDY_TOOL
+      | typeof X_CLASSIFY_TOOL
+      | typeof X_QUERIES_TOOL;
     maxTokens: number;
   }): Promise<T> {
     if (!this.apiKey) {

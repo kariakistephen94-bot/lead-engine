@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AtSign,
   BarChart3,
   Building2,
   CalendarClock,
@@ -61,6 +62,7 @@ const NAV: { section: string; items: { href: string; label: string; icon: React.
       section: "Grow",
       items: [
         { href: "/engine", label: "Lead Engine", icon: Radar },
+        { href: "/x", label: "X Leads", icon: AtSign },
         { href: "/outreach", label: "Outreach", icon: Send },
         { href: "/social", label: "Social DMs", icon: MessageCircle },
         { href: "/jobs", label: "Opportunities", icon: Rss },

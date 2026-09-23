@@ -71,6 +71,13 @@
       "when": 1788239596921,
       "tag": "0009_project_case_study",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790071647445,
+      "tag": "0010_x_leads_remove_facebook",
+      "breakpoints": true
     }
   ]
 }

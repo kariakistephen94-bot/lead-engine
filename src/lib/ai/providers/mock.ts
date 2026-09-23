@@ -12,7 +12,13 @@ import type {
   SocialPostSet,
   SocialSubject,
   SocialVariation,
+  XBusinessContext,
+  XNicheContext,
+  XPostClassification,
+  XPostToClassify,
+  XQueryDraft,
 } from "../types";
+import { fallbackQueries, ruleClassify } from "../x-leads";
 
 /**
  * Offline adapter for development and tests.
@@ -146,14 +152,17 @@ export class MockAIProvider implements AIProvider {
     if (s?.hasLeadForm === false) observations.push("no lead capture form on the site");
     if (s?.hasVideo === false) observations.push("no video on the site");
 
-    const hook = observations[0]
-      ? `Noticed ${subject.companyName} is ${observations[0]}`
-      : `Came across ${subject.companyName} on ${subject.platform}`;
+    // Their own post beats anything inferred from their website.
+    const post = subject.publicPosts?.[0];
+    const hook = post
+      ? `Saw your post on ${post.platform} about ${post.text.replace(/\s+/g, " ").trim().slice(0, 60).toLowerCase()}`
+      : observations[0]
+        ? `Noticed ${subject.companyName} is ${observations[0]}`
+        : `Came across ${subject.companyName} on ${subject.platform}`;
     const gap = observations[1] ?? observations[0] ?? "a gap worth a look";
 
     const where =
       subject.platform === "instagram" ? "IG"
-      : subject.platform === "facebook" ? "Facebook"
       : subject.platform === "twitter" ? "X"
       : "LinkedIn";
 
@@ -251,6 +260,14 @@ export class MockAIProvider implements AIProvider {
       demonstrates: p.stack.slice(0, 4).map((tool) => `Working knowledge of ${tool}`),
       basisUsed: ["project record", latest ? `build log ${latest.loggedOn}` : "no build logs"],
     };
+  }
+
+  async classifyXPosts(input: { business: XBusinessContext; posts: XPostToClassify[] }): Promise<XPostClassification[]> {
+    return input.posts.map((post) => ruleClassify(post, input.business));
+  }
+
+  async writeXSearchQueries(input: { business: XBusinessContext; niche: XNicheContext }): Promise<XQueryDraft[]> {
+    return fallbackQueries(input.niche);
   }
 
   async parseProspectCriteria(prompt: string): Promise<ProspectCriteria> {

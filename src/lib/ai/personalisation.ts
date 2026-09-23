@@ -31,6 +31,9 @@ export function factSheet(subject: PersonalisationSubject): string[] {
     if (s.socials?.length) facts.push(`They have social accounts: ${s.socials.join(", ")}.`);
     for (const o of s.opportunities ?? []) facts.push(`Observed gap: ${o}`);
   }
+  for (const post of subject.publicPosts ?? []) {
+    facts.push(`They posted publicly on ${post.platform}: "${post.text.replace(/\s+/g, " ").trim().slice(0, 400)}"`);
+  }
   return facts;
 }
 

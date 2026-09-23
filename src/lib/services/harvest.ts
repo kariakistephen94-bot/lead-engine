@@ -20,7 +20,7 @@ import { normalizeDomain, normalizeEmail } from "@/lib/utils";
  *  - the site answers (the business still exists and is online),
  *  - there is a route to reach them (an address they publish themselves),
  *  - and there is evidence they are actively marketing — a linked Instagram,
- *    TikTok, Facebook or LinkedIn profile, or an advertising pixel.
+ *    TikTok, YouTube or LinkedIn profile, or an advertising pixel.
  *
  * Anything failing those is rejected with the reason recorded, because a list
  * padded with dead domains costs more than a shorter list that is true. No
@@ -144,7 +144,7 @@ const NOT_A_HANDLE = new Set([
 ]);
 
 const PLATFORM_LABEL: Record<string, string> = {
-  instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook",
+  instagram: "Instagram", tiktok: "TikTok",
   linkedin: "LinkedIn", youtube: "YouTube", x: "X/Twitter",
 };
 
@@ -165,7 +165,6 @@ export function socialUrl(platform: string, handle: string): string | null {
   switch (platform) {
     case "instagram": return `https://www.instagram.com/${handle}`;
     case "tiktok": return `https://www.tiktok.com/@${handle}`;
-    case "facebook": return `https://www.facebook.com/${handle}`;
     case "linkedin": return `https://www.linkedin.com/company/${handle}`;
     // Channel ids come out of /channel/UC… links and are not @handles; sending
     // one to the @ form produces a URL that 404s.

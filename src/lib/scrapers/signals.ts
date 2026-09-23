@@ -94,7 +94,6 @@ const SOCIAL: { key: string; pattern: RegExp }[] = [
   { key: "instagram", pattern: /instagram\.com\/([A-Za-z0-9_.]{2,30})/i },
   { key: "tiktok", pattern: /tiktok\.com\/@([A-Za-z0-9_.]{2,30})/i },
   { key: "youtube", pattern: /youtube\.com\/(?:@|c\/|channel\/|user\/)([A-Za-z0-9_.-]{2,40})/i },
-  { key: "facebook", pattern: /facebook\.com\/([A-Za-z0-9_.-]{2,40})/i },
   /*
    * The path segment is captured with the slug ("in/jane", "company/acme").
    * A company page cannot accept a connection request, so which of the two it

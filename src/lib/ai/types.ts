@@ -77,6 +77,12 @@ export type PersonalisationSubject = {
     socials?: string[];
     opportunities?: string[];
   } | null;
+  /**
+   * What they said in public, verbatim, where it was found — e.g. the X post
+   * that surfaced them. The strongest opener material there is, because it is
+   * their own words about their own problem.
+   */
+  publicPosts?: { platform: string; text: string }[];
   /** What we are selling to them. */
   offer: string;
   senderName: string;
@@ -95,7 +101,7 @@ export type PersonalisedEmail = {
  * the conversation will happen — the platform changes tone and length rules.
  */
 export type DmSubject = PersonalisationSubject & {
-  platform: "instagram" | "facebook" | "twitter" | "linkedin";
+  platform: "instagram" | "twitter" | "linkedin";
   /** Their handle on that platform, without the @. */
   handle: string;
 };
@@ -215,7 +221,7 @@ export type SocialPostSet = {
   basisUsed: string[];
 };
 
-export interface AIProvider {
+export interface AIProvider extends XLeadAI {
   readonly name: string;
   readonly model: string;
   /** True when the adapter has everything it needs (API key etc.). */
@@ -242,4 +248,53 @@ export class AIProviderError extends Error {
     super(message);
     this.name = "AIProviderError";
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* X lead sourcing                                                            */
+/* -------------------------------------------------------------------------- */
+
+export type XIntent = "buyer" | "pain" | "hiring" | "peer" | "seller" | "noise";
+
+export type XNicheContext = {
+  name: string;
+  targetMarket: string | null;
+  painPoints: string | null;
+  offer: string | null;
+};
+
+/** What the business sells and to whom — the yardstick every post is judged against. */
+export type XBusinessContext = {
+  description: string;
+  niches: XNicheContext[];
+};
+
+export type XPostToClassify = {
+  id: string;
+  text: string;
+  authorUsername: string;
+  authorName: string | null;
+  authorBio: string | null;
+  authorFollowers: number | null;
+  authorWebsite: string | null;
+};
+
+export type XPostClassification = {
+  id: string;
+  /** 0–100 fit of the author as a lead for this business. */
+  relevance: number;
+  intent: XIntent;
+  /** One sentence a salesperson can read at a glance. */
+  reason: string;
+  /** Best-fitting niche name, or null. */
+  niche: string | null;
+};
+
+export type XQueryDraft = { name: string; query: string; rationale: string };
+
+export interface XLeadAI {
+  /** Score a batch of posts for buyer intent and fit. One result per post. */
+  classifyXPosts(input: { business: XBusinessContext; posts: XPostToClassify[] }): Promise<XPostClassification[]>;
+  /** Write X search queries that find a niche's operators describing their pain. */
+  writeXSearchQueries(input: { business: XBusinessContext; niche: XNicheContext }): Promise<XQueryDraft[]>;
 }

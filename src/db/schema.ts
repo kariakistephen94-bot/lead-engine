@@ -149,13 +149,12 @@ export const jobStatus = pgEnum("job_status", [
 ]);
 
 /**
- * Where a cold DM is sent. Twitter and LinkedIn joined the original two in the
- * September 2026 outreach push; LinkedIn is the odd one out because the first
- * touch is a connection request with a 300-character note, not a message.
+ * Where a cold DM is sent. LinkedIn is the odd one out because the first touch
+ * is a connection request with a 300-character note, not a message. Facebook
+ * was dropped as a channel in September 2026.
  */
 export const dmPlatform = pgEnum("dm_platform", [
   "instagram",
-  "facebook",
   "twitter",
   "linkedin",
 ]);
@@ -713,7 +712,7 @@ export const companySignals = pgTable(
     stack: text("stack").array().notNull().default(sql`'{}'::text[]`),
     https: boolean("https"),
     mobileFriendly: boolean("mobile_friendly"),
-    /** Handles found on the site: instagram, tiktok, youtube, facebook, x… */
+    /** Handles found on the site: instagram, tiktok, youtube, linkedin, x… */
     social: jsonb("social"),
 
     /** 0-100. Higher = more obvious opportunity. */
@@ -869,13 +868,13 @@ export const emailSuppressions = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
-/* Social DM scripts — Instagram / Facebook outreach                          */
+/* Social DM scripts — Instagram / X / LinkedIn outreach                      */
 /* -------------------------------------------------------------------------- */
 
 /**
  * A generated two-message DM sequence for one lead on one platform.
  *
- * DMs cannot be sent by the app (no Instagram/Facebook messaging API for cold
+ * DMs cannot be sent by the app (no platform offers a messaging API for cold
  * outreach), so the unit here is a *script* the owner sends by hand and then
  * marks off. Statuses mirror that manual flow: draft → first_sent →
  * second_sent, with replied/dismissed as exits at any point.
@@ -1222,3 +1221,150 @@ export type SocialPlatform = (typeof socialPlatform.enumValues)[number];
 export type ContentFormat = (typeof contentFormat.enumValues)[number];
 export type PostStatus = (typeof postStatus.enumValues)[number];
 export type BuildStatus = (typeof buildStatus.enumValues)[number];
+
+/* -------------------------------------------------------------------------- */
+/* X (Twitter) lead sourcing                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Pipeline state of an X author. The *author* is the lead, not the post: one
+ * person tweeting about the same pain five times is one prospect, and at scale
+ * collapsing on the author is what keeps the review queue workable.
+ */
+export const xLeadStatus = pgEnum("x_lead_status", [
+  "new",        // seen, not yet above the relevance threshold
+  "qualified",  // a post scored at or above the threshold
+  "converted",  // turned into a company + contact in the CRM
+  "dismissed",  // reviewed and rejected; never resurfaced
+]);
+
+/**
+ * A saved X search, run on a schedule by the worker.
+ *
+ * `sinceId` is the newest post id already fetched, so every run after the first
+ * asks X only for what is new — X bills per post read, and re-reading the same
+ * week of results every hour would multiply the cost for zero new leads.
+ *
+ * `lockedUntil` is a lease rather than a flag: a worker that dies mid-run
+ * simply lets it expire, and the next worker picks the search back up.
+ */
+export const xSearches = pgTable(
+  "x_searches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** X search syntax, e.g. `("need help" OR "recommend") (zapier OR n8n) -is:retweet lang:en`. */
+    query: text("query").notNull(),
+    nicheId: uuid("niche_id").references(() => niches.id, { onDelete: "set null" }),
+    enabled: boolean("enabled").notNull().default(true),
+    /** Turn qualified authors into CRM leads without waiting for a review. */
+    autoConvert: boolean("auto_convert").notNull().default(false),
+    intervalMinutes: integer("interval_minutes").notNull().default(60),
+    /** Upper bound on posts read per run, so one noisy query cannot drain the monthly cap. */
+    maxPostsPerRun: integer("max_posts_per_run").notNull().default(100),
+    sinceId: text("since_id"),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastStatus: text("last_status"),
+    lastError: text("last_error"),
+    postsFound: integer("posts_found").notNull().default(0),
+    leadsFound: integer("leads_found").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("x_searches_due_idx").on(t.enabled, t.nextRunAt)],
+);
+
+/** One X account that posted something a search matched. */
+export const xAuthors = pgTable(
+  "x_authors",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** X's numeric user id — stable across handle changes, so it is the dedupe key. */
+    xUserId: text("x_user_id").notNull(),
+    username: text("username").notNull(),
+    name: text("name"),
+    bio: text("bio"),
+    location: text("location"),
+    /** The website on their profile, already expanded out of t.co. */
+    website: text("website"),
+    followers: integer("followers"),
+    following: integer("following"),
+    verified: boolean("verified"),
+    accountCreatedAt: timestamp("account_created_at", { withTimezone: true }),
+    bestScore: smallint("best_score"),
+    bestIntent: text("best_intent"),
+    bestTweetId: text("best_tweet_id"),
+    matchedPosts: integer("matched_posts").notNull().default(0),
+    status: xLeadStatus("status").notNull().default("new"),
+    nicheId: uuid("niche_id").references(() => niches.id, { onDelete: "set null" }),
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    convertedAt: timestamp("converted_at", { withTimezone: true }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("x_authors_user_key").on(t.xUserId),
+    index("x_authors_status_score_idx").on(t.status, t.bestScore.desc()),
+    index("x_authors_username_idx").on(sql`lower(${t.username})`),
+    index("x_authors_contact_idx").on(t.contactId),
+    index("x_authors_last_seen_idx").on(t.lastSeenAt.desc()),
+  ],
+);
+
+/**
+ * Every post a search returned, kept whether or not it qualified — the reason
+ * a post was rejected is as useful for tuning a query as the ones that passed.
+ *
+ * Classification is a queue: rows with `classifiedAt` null are claimed in
+ * batches under a lease (`classifyLeaseUntil`) with SKIP LOCKED, so any number
+ * of workers can drain it without scoring the same post twice.
+ */
+export const xPosts = pgTable(
+  "x_posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tweetId: text("tweet_id").notNull(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => xAuthors.id, { onDelete: "cascade" }),
+    searchId: uuid("search_id").references(() => xSearches.id, { onDelete: "set null" }),
+    text: text("text").notNull(),
+    lang: text("lang"),
+    url: text("url").notNull(),
+    isReply: boolean("is_reply").notNull().default(false),
+    metrics: jsonb("metrics").$type<Record<string, number>>(),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    /** 0–100 fit with the business, from the classifier. */
+    relevance: smallint("relevance"),
+    /** buyer | pain | hiring | peer | seller | noise */
+    intent: text("intent"),
+    reason: text("reason"),
+    /** Niche the classifier matched the author to, when it matched one. */
+    nicheId: uuid("niche_id").references(() => niches.id, { onDelete: "set null" }),
+    /** "rules" when the prefilter rejected it before any model saw it. */
+    classifiedBy: text("classified_by"),
+    classifiedAt: timestamp("classified_at", { withTimezone: true }),
+    classifyLeaseUntil: timestamp("classify_lease_until", { withTimezone: true }),
+    classifyAttempts: smallint("classify_attempts").notNull().default(0),
+    raw: jsonb("raw"),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("x_posts_tweet_key").on(t.tweetId),
+    index("x_posts_author_idx").on(t.authorId),
+    index("x_posts_search_idx").on(t.searchId),
+    index("x_posts_unclassified_idx").on(t.discoveredAt).where(sql`${t.classifiedAt} is null`),
+    index("x_posts_relevance_idx").on(t.relevance.desc()),
+    index("x_posts_discovered_idx").on(t.discoveredAt.desc()),
+  ],
+);
+
+export type XSearch = typeof xSearches.$inferSelect;
+export type NewXSearch = typeof xSearches.$inferInsert;
+export type XAuthor = typeof xAuthors.$inferSelect;
+export type XPost = typeof xPosts.$inferSelect;
+export type XLeadStatus = (typeof xLeadStatus.enumValues)[number];

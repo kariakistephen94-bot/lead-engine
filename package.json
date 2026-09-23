@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "scrape": "tsx src/scripts/scrape.ts",
     "harvest": "tsx src/scripts/harvest.ts",
+    "x:worker": "tsx src/scripts/x-worker.ts",
     "send": "tsx src/scripts/send.ts",
     "build:seed": "tsx src/scripts/seed-curriculum.ts"
   },

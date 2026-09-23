@@ -420,3 +420,21 @@ export const prospectParseSchema = z.object({
   prompt: z.string().trim().min(3, "Describe who you are looking for").max(500),
 });
 
+
+/* -------------------------------------------------------------------------- */
+/* X lead engine                                                              */
+/* -------------------------------------------------------------------------- */
+
+export const xSearchSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(120),
+  // X's recent-search limit; the service also checks brackets and quotes.
+  query: z.string().trim().min(1, "Query is required").max(512, "X allows at most 512 characters"),
+  nicheId: z.string().uuid().nullish(),
+  enabled: z.boolean().optional(),
+  autoConvert: z.boolean().optional(),
+  // Under 15 minutes mostly re-asks for nothing new while spending rate limit.
+  intervalMinutes: z.coerce.number().int().min(15).max(10_080).optional(),
+  maxPostsPerRun: z.coerce.number().int().min(10).max(1000).optional(),
+});
+
+export type XSearchInput = z.infer<typeof xSearchSchema>;

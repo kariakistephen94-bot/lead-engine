@@ -3,7 +3,6 @@ import type { DmSubject } from "./types";
 
 const PLATFORM_LABEL: Record<DmSubject["platform"], string> = {
   instagram: "Instagram",
-  facebook: "Facebook",
   twitter: "X (Twitter)",
   linkedin: "LinkedIn",
 };
@@ -20,7 +19,6 @@ const PLATFORM_LABEL: Record<DmSubject["platform"], string> = {
 function platformRules(platform: DmSubject["platform"]): string[] {
   switch (platform) {
     case "instagram":
-    case "facebook":
       return [
         "2–4 short sentences, written like a casual DM between business people.",
         "No links. Links in a first DM read as spam and get the account flagged.",

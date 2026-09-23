@@ -27,6 +27,10 @@ import { updateSupabaseSession } from "@/lib/supabase/middleware";
  * refuse outright when the key is unset. It is listed here because the caller
  * is a server with no cookie, so the session gate would reject it before its
  * own guard ever ran.
+ *
+ * `/api/cron` is the entry point for an external scheduler. Same reasoning:
+ * the caller has no cookie, and each route checks CRON_SECRET itself,
+ * refusing outright when it is unset.
  */
 const PUBLIC_PATHS = [
   "/login",
@@ -37,6 +41,7 @@ const PUBLIC_PATHS = [
   "/unsubscribe",
   "/api/webhooks",
   "/api/public",
+  "/api/cron",
 ];
 
 function deny(request: NextRequest, pathname: string) {

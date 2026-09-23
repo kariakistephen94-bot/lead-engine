@@ -17,7 +17,7 @@ export default async function SocialDmPage() {
     <>
       <PageHeader
         title="Social DMs"
-        description="Leads whose own sites link an Instagram or Facebook account. The writer turns the scan's evidence into a two-message opener you send by hand."
+        description="Leads whose own sites link an Instagram, LinkedIn or X account, plus leads found posting on X. The writer turns the evidence into a two-message opener you send by hand."
       />
       <PageBody>
         <SocialDmView

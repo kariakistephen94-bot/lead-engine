@@ -3,24 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
-  AlertTriangle, AtSign, Camera, Check, Copy, ExternalLink,
-  MessageCircle, Send, Sparkles, ThumbsUp, UserPlus, Users,
+  AlertTriangle, AtSign, Camera, Check, Copy,
+  MessageCircle, Send, Sparkles, UserPlus, Users,
 } from "lucide-react";
 
 /** lucide dropped brand marks, so platforms get evocative stand-ins. */
 const Instagram = Camera;
-const Facebook = ThumbsUp;
 const X = AtSign;
 const LinkedIn = Users;
 
-type Platform = "instagram" | "facebook" | "twitter" | "linkedin";
+type Platform = "instagram" | "twitter" | "linkedin";
 
 const PLATFORM_ICON: Record<Platform, React.ElementType> = {
-  instagram: Instagram, facebook: Facebook, twitter: X, linkedin: LinkedIn,
+  instagram: Instagram, twitter: X, linkedin: LinkedIn,
 };
 
 const PLATFORM_LABEL: Record<Platform, string> = {
-  instagram: "Instagram", facebook: "Facebook", twitter: "X", linkedin: "LinkedIn",
+  instagram: "Instagram", twitter: "X", linkedin: "LinkedIn",
 };
 
 import { Badge } from "@/components/ui/Badge";
@@ -35,11 +34,11 @@ import { cn, formatNumber } from "@/lib/utils";
 type Prospect = {
   id: string; fullName: string | null; companyName: string;
   industry: string | null; country: string | null; status: string;
-  instagram: string | null; facebook: string | null;
+  instagram: string | null;
   twitter: string | null; linkedin: string | null;
   runsAds: boolean; adPlatforms: string[];
   score: number | null; opportunities: string[];
-  drafted: string[];
+  drafted: string[]; fromX: boolean;
 };
 
 type Draft = {
@@ -61,27 +60,18 @@ const STATUS_LABEL: Record<string, string> = {
   second_sent: "follow-up sent", replied: "replied", dismissed: "dismissed",
 };
 
-const profileUrl = (platform: string, handle: string) => {
+const profileUrl = (platform: Platform, handle: string) => {
   switch (platform) {
     case "instagram": return `https://www.instagram.com/${handle}/`;
     case "twitter": return `https://x.com/${handle}`;
     // Newer scans store the path segment ("in/jane"); older rows hold a bare slug.
     case "linkedin": return `https://www.linkedin.com/${handle.includes("/") ? handle : `company/${handle}`}`;
-    default: return `https://www.facebook.com/${handle}`;
   }
 };
 
 /** LinkedIn handles are a path, not an @name. */
 const handleLabel = (platform: string, handle: string) =>
   platform === "linkedin" ? handle.replace(/^in\//, "") : `@${handle}`;
-
-const adsLibraryUrl = (companyName: string, country?: string | null) => {
-  const cc = country?.trim().toLowerCase().startsWith("united k") ? "GB" : "US";
-  return (
-    `https://www.facebook.com/ads/library/?active_status=active&ad_type=all` +
-    `&country=${cc}&q=${encodeURIComponent(companyName)}&search_type=keyword_unordered`
-  );
-};
 
 export function SocialDmView({
   prospects, drafts, stats, providerName,
@@ -195,7 +185,6 @@ export function SocialDmView({
                   <option value="instagram">Instagram</option>
                   <option value="linkedin">LinkedIn</option>
                   <option value="twitter">X</option>
-                  <option value="facebook">Facebook</option>
                 </Select>
               </Field>
               <Button variant="primary" onClick={writeScripts} disabled={busy !== null || !selected.size}>
@@ -218,7 +207,7 @@ export function SocialDmView({
             </div>
             {prospects.length === 0 ? (
               <EmptyState icon={<Users className="h-5 w-5" />} title="No DM-able leads yet"
-                          description="Run a website scan from the Lead Engine — any lead whose site links an Instagram, LinkedIn, X or Facebook account shows up here. LinkedIn company pages are excluded: they cannot accept a connection request." />
+                          description="Run a website scan from the Lead Engine, or convert leads found on X — any lead whose site links an Instagram, LinkedIn or X account shows up here. LinkedIn company pages are excluded: they cannot accept a connection request." />
             ) : (
               <ul className="border-t border-line">
                 {prospects.map((p) => {
@@ -238,6 +227,7 @@ export function SocialDmView({
                           <span className="text-sm font-medium text-ink">{p.companyName}</span>
                           {p.industry && <Badge tone="slate">{p.industry}</Badge>}
                           {p.runsAds && <Badge tone="green">running ads</Badge>}
+                          {p.fromX && <Badge tone="indigo">found on X</Badge>}
                           {p.drafted.length > 0 && <Badge tone="blue">scripted</Badge>}
                           {p.score != null && (
                             <span className="tabular rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-ink-soft">{p.score}</span>
@@ -262,16 +252,6 @@ export function SocialDmView({
                               <X className="h-3 w-3" /> @{p.twitter}
                             </a>
                           )}
-                          {p.facebook && (
-                            <a href={profileUrl("facebook", p.facebook)} target="_blank" rel="noreferrer"
-                               className="inline-flex items-center gap-1 text-brand hover:underline">
-                              <Facebook className="h-3 w-3" /> {p.facebook}
-                            </a>
-                          )}
-                          <a href={adsLibraryUrl(p.companyName, p.country)} target="_blank" rel="noreferrer"
-                             className="inline-flex items-center gap-1 text-ink-faint hover:text-ink hover:underline">
-                            <ExternalLink className="h-3 w-3" /> check Ads Library
-                          </a>
                           {p.country && <span className="text-ink-faint">{p.country}</span>}
                         </div>
                         {p.opportunities.length > 0 && (

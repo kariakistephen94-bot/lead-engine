@@ -94,7 +94,7 @@ export const SYSTEM_SOURCES = [
   { name: "OpenStreetMap", slug: "openstreetmap" },
   { name: "LinkedIn", slug: "linkedin" },
   { name: "Instagram", slug: "instagram" },
-  { name: "Facebook", slug: "facebook" },
+  { name: "X (Twitter)", slug: "x" },
   { name: "Website Research", slug: "website-research" },
   { name: "Referral", slug: "referral" },
   { name: "CSV Import", slug: "csv-import" },

@@ -4,6 +4,7 @@ import { caseStudyPrompt } from "../case-study";
 import { dmPrompt } from "../dm";
 import { personalisationPrompt } from "../personalisation";
 import { socialPrompt } from "../social";
+import { classifyPrompt, normalizeClassifications, normalizeQueries, queriesPrompt, X_INTENTS } from "../x-leads";
 import {
   AIProviderError,
   type AIProvider,
@@ -18,6 +19,11 @@ import {
   type ResearchSubject,
   type SocialPostSet,
   type SocialSubject,
+  type XBusinessContext,
+  type XNicheContext,
+  type XPostClassification,
+  type XPostToClassify,
+  type XQueryDraft,
 } from "../types";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -49,7 +55,7 @@ export class GeminiProvider implements AIProvider {
     return Boolean(this.apiKey);
   }
 
-  private async generate<T>(prompt: string, schema: Record<string, unknown>): Promise<T> {
+  private async generate<T>(prompt: string, schema: Record<string, unknown>, temperature = 0.7): Promise<T> {
     if (!this.apiKey) throw new AIProviderError("GEMINI_API_KEY is not set", this.name);
 
     const response = await fetch(`${BASE}/${this.model}:generateContent`, {
@@ -58,7 +64,7 @@ export class GeminiProvider implements AIProvider {
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.7,
+          temperature,
           responseMimeType: "application/json",
           responseSchema: schema,
         },
@@ -85,6 +91,57 @@ export class GeminiProvider implements AIProvider {
     } catch {
       throw new AIProviderError("Gemini returned malformed JSON", this.name);
     }
+  }
+
+  async classifyXPosts(input: { business: XBusinessContext; posts: XPostToClassify[] }): Promise<XPostClassification[]> {
+    const result = await this.generate<{ results?: unknown[] }>(
+      classifyPrompt(input.business, input.posts),
+      {
+        type: "object",
+        properties: {
+          results: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                relevance: { type: "integer" },
+                intent: { type: "string", enum: X_INTENTS },
+                reason: { type: "string" },
+                niche: { type: "string", nullable: true },
+              },
+              required: ["id", "relevance", "intent", "reason"],
+            },
+          },
+        },
+        required: ["results"],
+      },
+      // Scoring should be repeatable, not creative.
+      0.1,
+    );
+    return normalizeClassifications(result.results, input.posts, input.business);
+  }
+
+  async writeXSearchQueries(input: { business: XBusinessContext; niche: XNicheContext }): Promise<XQueryDraft[]> {
+    const result = await this.generate<{ queries?: unknown[] }>(
+      queriesPrompt(input.business, input.niche),
+      {
+        type: "object",
+        properties: {
+          queries: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" }, query: { type: "string" }, rationale: { type: "string" } },
+              required: ["name", "query", "rationale"],
+            },
+          },
+        },
+        required: ["queries"],
+      },
+      0.4,
+    );
+    return normalizeQueries(result.queries, input.niche);
   }
 
   async personaliseEmail(subject: PersonalisationSubject): Promise<PersonalisedEmail> {

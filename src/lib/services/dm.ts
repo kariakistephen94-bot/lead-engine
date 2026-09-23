@@ -1,11 +1,11 @@
 import "server-only";
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
   activities, companies, companySignals, contacts, dmDrafts, followUps,
-  type DmPlatform, type DmStatus,
+  xAuthors, xPosts, type DmPlatform, type DmStatus,
 } from "@/db/schema";
 import { getAIProvider } from "@/lib/ai";
 import type { DmSubject } from "@/lib/ai/types";
@@ -24,7 +24,6 @@ export type DmProspect = {
   country: string | null;
   status: string;
   instagram: string | null;
-  facebook: string | null;
   twitter: string | null;
   /** Path segment plus slug, e.g. "in/jane". Only `in/` profiles are DM-able. */
   linkedin: string | null;
@@ -33,12 +32,14 @@ export type DmProspect = {
   score: number | null;
   opportunities: string[];
   drafted: DmPlatform[];
+  /** Surfaced by the X search engine rather than a website scan. */
+  fromX: boolean;
 };
 
 /**
- * Handles the website scraper caught that are Facebook plumbing, not profiles:
- * `/tr` is the Meta pixel endpoint, and the rest are share/login routes. A DM
- * can't be sent to any of these, so they read as "no handle".
+ * Handles the website scraper caught that are platform plumbing, not profiles:
+ * share, login and content routes. A DM can't be sent to any of these, so they
+ * read as "no handle".
  */
 const JUNK_HANDLES = new Set(["tr", "sharer", "sharer.php", "share.php", "profile.php", "pages", "login", "plugins", "dialog", "hashtag", "groups", "events", "watch", "reel", "stories", "p", "explore", "accounts"]);
 
@@ -54,7 +55,6 @@ const realHandle = (handle: string | null | undefined): string | null =>
  */
 export const SOCIAL_KEY: Record<DmPlatform, string> = {
   instagram: "instagram",
-  facebook: "facebook",
   twitter: "x",
   linkedin: "linkedin",
 };
@@ -63,15 +63,12 @@ export const SOCIAL_KEY: Record<DmPlatform, string> = {
  * Order of preference when a lead has more than one handle.
  *
  * Instagram first because the blueprint's experience is that IG DMs convert
- * best, then LinkedIn where the reader is already in a work mindset, then X,
- * with Facebook last — a Facebook page DM most often lands with whoever runs
- * the page rather than the owner.
+ * best, then LinkedIn where the reader is already in a work mindset, then X.
  */
-const PLATFORM_PREFERENCE: DmPlatform[] = ["instagram", "linkedin", "twitter", "facebook"];
+const PLATFORM_PREFERENCE: DmPlatform[] = ["instagram", "linkedin", "twitter"];
 
 export const PLATFORM_LABEL: Record<DmPlatform, string> = {
   instagram: "Instagram",
-  facebook: "Facebook",
   twitter: "X",
   linkedin: "LinkedIn",
 };
@@ -84,8 +81,6 @@ export const profileUrl = (platform: DmPlatform, handle: string) => {
   switch (platform) {
     case "instagram":
       return `https://www.instagram.com/${handle}/`;
-    case "facebook":
-      return `https://www.facebook.com/${handle}`;
     case "twitter":
       return `https://x.com/${handle}`;
     case "linkedin":
@@ -104,28 +99,17 @@ export const profileUrl = (platform: DmPlatform, handle: string) => {
 export const isDmableLinkedIn = (handle: string) => handle.toLowerCase().startsWith("in/");
 
 /**
- * Deep link into the Facebook Ads Library search for this business — the
- * blueprint's Method 1 check that a prospect is actively spending on ads
- * before any time goes into messaging them. US library by default because
- * that is where the targeting lives; UK leads still resolve (the country
- * filter is changeable on the page itself).
- */
-export const adsLibraryUrl = (companyName: string, country?: string | null) => {
-  const cc = country?.trim().toLowerCase().startsWith("united k") ? "GB" : "US";
-  return (
-    `https://www.facebook.com/ads/library/?active_status=active&ad_type=all` +
-    `&country=${cc}&q=${encodeURIComponent(companyName)}&search_type=keyword_unordered`
-  );
-};
-
-/**
- * Leads reachable by DM: their own website links an Instagram or Facebook
- * account, the site scan actually succeeded (verified live), and the lead
- * isn't archived. Ranked ads-first, then by opportunity score — someone
- * already paying for traffic is the blueprint's definition of a serious
- * prospect.
+ * Leads reachable by DM, from either of two routes:
+ *  - their own website links an Instagram, LinkedIn or X account and the site
+ *    scan succeeded (verified live), or
+ *  - the X search engine found them posting and they were converted — the
+ *    handle is verified by definition, since it is where they posted.
+ *
+ * Ranked ads-first, then by opportunity score — someone already paying for
+ * traffic is the blueprint's definition of a serious prospect.
  */
 export async function listDmProspects(limit = 200): Promise<DmProspect[]> {
+  const siteHasHandle = sql`(${companySignals.error} is null and ${companySignals.social} ?| array['instagram', 'x', 'linkedin'])`;
   const rows = await db
     .select({
       id: contacts.id,
@@ -134,32 +118,33 @@ export async function listDmProspects(limit = 200): Promise<DmProspect[]> {
       companyName: companies.name,
       industry: companies.industry,
       country: companies.country,
-      instagram: sql<string | null>`${companySignals.social} ->> 'instagram'`,
-      facebook: sql<string | null>`${companySignals.social} ->> 'facebook'`,
-      twitter: sql<string | null>`${companySignals.social} ->> 'x'`,
-      linkedin: sql<string | null>`${companySignals.social} ->> 'linkedin'`,
+      instagram: sql<string | null>`case when ${siteHasHandle} then ${companySignals.social} ->> 'instagram' end`,
+      twitter: sql<string | null>`coalesce(${xAuthors.username}, case when ${siteHasHandle} then ${companySignals.social} ->> 'x' end)`,
+      linkedin: sql<string | null>`case when ${siteHasHandle} then ${companySignals.social} ->> 'linkedin' end`,
       adPlatforms: companySignals.adPlatforms,
-      score: companySignals.opportunityScore,
+      score: sql<number | null>`coalesce(${companySignals.opportunityScore}, ${xAuthors.bestScore})`,
       opportunities: companySignals.opportunities,
+      fromX: sql<boolean>`${xAuthors.id} is not null`,
       // Cast to text[] — node-postgres can't parse a custom enum array and
       // would hand back the raw string '{}', which is truthy.
       drafted: sql<DmPlatform[]>`coalesce(array_agg(${dmDrafts.platform}::text) filter (where ${dmDrafts.id} is not null), '{}')::text[]`,
     })
     .from(contacts)
     .innerJoin(companies, eq(companies.id, contacts.companyId))
-    .innerJoin(companySignals, eq(companySignals.companyId, companies.id))
+    .leftJoin(companySignals, eq(companySignals.companyId, companies.id))
+    .leftJoin(xAuthors, eq(xAuthors.contactId, contacts.id))
     .leftJoin(dmDrafts, eq(dmDrafts.contactId, contacts.id))
     .where(and(
       eq(contacts.archived, false),
-      isNull(companySignals.error),
-      sql`(${companySignals.social} ?| array['instagram', 'facebook', 'x', 'linkedin'])`,
+      sql`(${siteHasHandle} or ${xAuthors.id} is not null)`,
     ))
     .groupBy(contacts.id, contacts.fullName, contacts.status, companies.name,
-      companies.industry, companies.country, companySignals.social,
-      companySignals.adPlatforms, companySignals.opportunityScore, companySignals.opportunities)
+      companies.industry, companies.country, companySignals.social, companySignals.error,
+      companySignals.adPlatforms, companySignals.opportunityScore, companySignals.opportunities,
+      xAuthors.id, xAuthors.username, xAuthors.bestScore)
     .orderBy(
       desc(sql`coalesce(array_length(${companySignals.adPlatforms}, 1), 0) > 0`),
-      desc(companySignals.opportunityScore),
+      sql`coalesce(${companySignals.opportunityScore}, ${xAuthors.bestScore}) desc nulls last`,
     )
     .limit(limit);
 
@@ -167,7 +152,6 @@ export async function listDmProspects(limit = 200): Promise<DmProspect[]> {
     .map((r) => ({
       ...r,
       instagram: realHandle(r.instagram),
-      facebook: realHandle(r.facebook),
       twitter: realHandle(r.twitter),
       linkedin: r.linkedin && isDmableLinkedIn(r.linkedin) ? r.linkedin : null,
       adPlatforms: r.adPlatforms ?? [],
@@ -175,9 +159,9 @@ export async function listDmProspects(limit = 200): Promise<DmProspect[]> {
       runsAds: (r.adPlatforms ?? []).length > 0,
       drafted: r.drafted ?? [],
     }))
-    // A row whose only handle was junk (e.g. the pixel's /tr) or a LinkedIn
+    // A row whose only handle was junk (e.g. a share link) or a LinkedIn
     // company page is not DM-able.
-    .filter((r) => r.instagram || r.facebook || r.twitter || r.linkedin);
+    .filter((r) => r.instagram || r.twitter || r.linkedin);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -219,10 +203,12 @@ export async function draftDmSequences(input: {
         hasVideo: companySignals.hasVideo, hasLeadForm: companySignals.hasLeadForm,
         cms: companySignals.cms, opportunities: companySignals.opportunities,
         signalError: companySignals.error,
+        xUsername: xAuthors.username, xBestTweetId: xAuthors.bestTweetId,
       })
       .from(contacts)
       .innerJoin(companies, eq(companies.id, contacts.companyId))
       .leftJoin(companySignals, eq(companySignals.companyId, companies.id))
+      .leftJoin(xAuthors, eq(xAuthors.contactId, contacts.id))
       .where(eq(contacts.id, contactId))
       .limit(1);
 
@@ -238,7 +224,14 @@ export async function draftDmSequences(input: {
     // request nor a DM — so it never counts as an available handle.
     if (social.linkedin && !isDmableLinkedIn(social.linkedin)) delete social.linkedin;
 
-    const available = PLATFORM_PREFERENCE.filter((candidate) => social[SOCIAL_KEY[candidate]]);
+    // Found on X: that handle is where they are demonstrably active, so it
+    // outranks anything linked from their website.
+    if (row.xUsername) social.x = row.xUsername;
+    const preference: DmPlatform[] = row.xUsername
+      ? ["twitter", ...PLATFORM_PREFERENCE.filter((p) => p !== "twitter")]
+      : PLATFORM_PREFERENCE;
+
+    const available = preference.filter((candidate) => social[SOCIAL_KEY[candidate]]);
     const platform: DmPlatform | null = input.platform
       ? (available.includes(input.platform) ? input.platform : null)
       : (available[0] ?? null);
@@ -248,12 +241,16 @@ export async function draftDmSequences(input: {
         contactId,
         reason: input.platform
           ? `No usable ${input.platform} handle on file`
-          : "No Instagram, LinkedIn, X or Facebook handle on file",
+          : "No Instagram, LinkedIn or X handle on file",
       });
       continue;
     }
 
     const handle = social[SOCIAL_KEY[platform]];
+
+    const [bestPost] = row.xBestTweetId
+      ? await db.select({ text: xPosts.text }).from(xPosts).where(eq(xPosts.tweetId, row.xBestTweetId)).limit(1)
+      : [];
 
     const subject: DmSubject = {
       companyName: row.companyName, industry: row.industry,
@@ -268,6 +265,7 @@ export async function draftDmSequences(input: {
         socials: Object.keys(social),
         opportunities: row.opportunities ?? [],
       },
+      publicPosts: bestPost ? [{ platform: "X", text: bestPost.text }] : undefined,
       offer: input.offer,
       senderName: SENDER_NAME(),
       platform,

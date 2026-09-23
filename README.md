@@ -70,6 +70,7 @@ always identifiable and can never be confused with real records.
 | `npm run auth:provision` | Create the Supabase Auth user and link it to an account |
 | `npm run scrape` | Run the job-board scrapers and scan company websites |
 | `npm run harvest` | Harvest and verify local businesses from OpenStreetMap |
+| `npm run x:worker` | X lead engine worker (`--once` for cron, `--status` for state) |
 
 ## Harvesting local businesses
 
@@ -97,7 +98,7 @@ Three phases:
      provider** — an address on some third party's domain is rejected outright,
      because writing to it would contact a stranger,
    - and there is current marketing activity: a linked Instagram, TikTok,
-     Facebook, LinkedIn or YouTube profile, an advertising pixel, or a live
+     LinkedIn or YouTube profile, an advertising pixel, or a live
      booking/chat tool. A site that was built once and abandoned does not pass.
 
    Every rejection is counted with its reason, and the evidence behind each
@@ -115,6 +116,72 @@ portal, whose marketing is not bought locally.
 **No social platform is scraped.** Handles come from the links a company puts on
 its own homepage, which is also why they can be trusted to be current.
 
+## X lead engine
+
+**X Leads** (`/x`) finds people on X who are asking for, or describing the
+problem behind, what the business sells — and turns them into leads. It uses
+X's official API v2 (recent search); nothing scrapes x.com.
+
+```
+saved searches ──(due)──▶ X recent search ──▶ x_posts + x_authors
+                                                   │
+                     rules prefilter ─▶ AI classifier (25 posts per call)
+                                                   │
+                  author's best post ≥ threshold → "qualified" → CRM lead
+```
+
+1. **Searches** are X queries saved with a niche, a schedule and a per-run cap.
+   "Generate from my niches" writes three per niche (with the configured AI
+   provider, or templates without one) and creates them paused for review.
+   Each run passes `since_id`, so X only returns posts newer than the last run.
+2. **Scoring.** Every post is judged against the business description on the
+   page's Scoring tab plus each niche's target market, pain points and offer.
+   The intent is one of `buyer`, `pain`, `hiring`, `peer`, `seller` or `noise`,
+   with a 0–100 relevance. Vendors and spam are rejected by rules before any
+   model is paid for. If the model fails, posts are retried and, after four
+   attempts, scored by the rules so the queue never stalls.
+3. **Leads.** The *author* is the lead. When their best post clears the
+   threshold (60 by default) they appear on the Leads tab for one-click
+   "Add to CRM" — or automatically, for searches with auto-add switched on.
+   Conversion creates a company (matched on the profile website's domain) and
+   a contact with source **X (Twitter)**, the qualifying post as the first
+   note, and a timeline entry. Converted authors then appear on **Social DMs**
+   with their X handle, and the DM writer uses their own post as the opener.
+
+### Setup
+
+Create an app at developer.x.com, buy API credits, and set in `.env.local`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `X_BEARER_TOKEN` | — | The app's Bearer Token. Required. |
+| `X_AUTORUN` | off | `true` runs due searches inside the web server |
+| `X_AUTORUN_INTERVAL_SECONDS` | `120` | How often the in-app scheduler ticks |
+| `X_MONTHLY_READ_BUDGET` | `10000` | Posts read per calendar month before searching stops; `0` = no cap |
+| `X_MIN_RELEVANCE` | `60` | Qualification threshold (also editable on the page) |
+| `CRON_SECRET` | — | Enables `GET/POST /api/cron/x` for an external scheduler |
+| `X_PROVIDER` | — | `mock` for offline testing only: invented `mock_…` accounts on `.example` sites |
+
+**Cost.** X bills pay-per-use: $0.005 per post read, capped by X at 3 million
+reads per month (docs.x.com, September 2026). The monthly budget is enforced
+before every request and is on by default, because an uncapped scheduler is an
+uncapped bill. The page shows reads and estimated spend for the month.
+
+### Running at scale
+
+Three ways to drive it, usable together:
+
+- **In-app** — `X_AUTORUN=true`. Nothing else to deploy.
+- **Workers** — `npm run x:worker` (loops) on any number of machines.
+- **Cron** — `npm run x:worker -- --once`, or call `/api/cron/x` with
+  `Authorization: Bearer $CRON_SECRET` (the header Vercel Cron sends).
+
+Searches and the scoring queue are claimed with leases and
+`FOR UPDATE SKIP LOCKED`, so extra workers split the work rather than
+repeating it, and a crashed worker's lease simply expires. A 429 or an empty
+credit balance sets a backoff shared by every worker. A query X rejects, or a
+revoked token, pauses the search instead of failing every hour.
+
 ## Providers
 
 External services sit behind interfaces in `src/lib/integrations/types.ts` and
@@ -124,7 +191,7 @@ the UI states plainly which provider actually answered.
 
 | Variable | Options | Needs |
 | --- | --- | --- |
-| `AI_PROVIDER` | `anthropic`, `mock` | `ANTHROPIC_API_KEY` |
+| `AI_PROVIDER` | `anthropic`, `gemini`, `mock` | `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` |
 | `LEAD_PROVIDER` | `apollo`, `mock` | `APOLLO_API_KEY` |
 | `ENRICHMENT_PROVIDER` | `mock` | — |
 | `EMAIL_PROVIDER` | `mock` | — |
@@ -160,9 +227,10 @@ status and score ambiguous. Firmographics live on `companies`; pipeline state
 (`status`, `lead_score`, `last_contacted_at`, `next_follow_up_at`) lives on
 `contacts`. One company has many contacts.
 
-17 tables: `users`, `niches`, `companies`, `contacts`, `lead_sources`, `tags`,
+Core tables: `users`, `niches`, `companies`, `contacts`, `lead_sources`, `tags`,
 `contact_tags`, `activities`, `outreach_events`, `notes`, `follow_ups`, `deals`,
-`ai_research`, `research_jobs`, `imports`, `import_rows`, `settings`.
+`ai_research`, `research_jobs`, `imports`, `import_rows`, `settings`. The X
+lead engine adds `x_searches`, `x_authors` and `x_posts`.
 
 ## Built for 50k+ leads
 
